@@ -339,6 +339,8 @@ Recommended for mobile and single-page applications.
 http://localhost:8000/oauth/redirect?client_id=YOUR_CLIENT_ID&redirect_uri=YOUR_REDIRECT_URI&use_pkce=true
 ```
 
+**1.1: Redirect with PKCE (Javascript) (Optional)**
+
 ```javascript
 class OAuthPKCE {
     constructor(clientId, redirectUri, authorizationUrl, tokenUrl) {
