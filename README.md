@@ -1,6 +1,7 @@
 # OAuth 2.0 Grants Starter - Laravel Documentation
 
 ## Table of Contents
+
 1. [Overview](#overview)
 2. [Prerequisites](#prerequisites)
 3. [Installation & Setup](#installation--setup)
@@ -112,6 +113,7 @@ php artisan vendor:publish --tag=passport-views
 **Use Case**: Web applications that can securely store client secrets.
 
 **Flow Overview**:
+
 1. User clicks "Login with OAuth"
 2. App redirects to authorization server
 3. User logs in and grants permissions
@@ -120,6 +122,7 @@ php artisan vendor:publish --tag=passport-views
 6. App uses access token to access protected resources
 
 **When to Use**:
+
 - Traditional web applications
 - Applications with server-side components
 - When you can keep client secret secure
@@ -129,12 +132,14 @@ php artisan vendor:publish --tag=passport-views
 **Use Case**: Machine-to-machine authentication where no user interaction is required.
 
 **Flow Overview**:
+
 1. Application sends client ID and secret to authorization server
 2. Authorization server validates credentials
 3. Server returns access token
 4. Application uses token to access API resources
 
 **When to Use**:
+
 - API-to-API communication
 - Cron jobs and background services
 - Server-to-server authentication
@@ -144,6 +149,7 @@ php artisan vendor:publish --tag=passport-views
 **Use Case**: Single-page applications (SPAs) and mobile apps that cannot securely store client secrets.
 
 **Flow Overview**:
+
 1. Client generates code verifier and challenge
 2. User is redirected to authorization server with challenge
 3. User authorizes the application
@@ -151,6 +157,7 @@ php artisan vendor:publish --tag=passport-views
 5. Client exchanges code + verifier for access token
 
 **When to Use**:
+
 - Single-page applications (React, Vue, Angular)
 - Mobile applications
 - Any public client that cannot store secrets
@@ -207,7 +214,7 @@ use Illuminate\Notifications\Notifiable;
 class User extends Authenticatable
 {
     use HasApiTokens, HasFactory, Notifiable;
-    
+
     // Your existing model code...
 }
 ```
@@ -240,7 +247,7 @@ class AuthServiceProvider extends ServiceProvider
         Passport::tokensExpireIn(now()->addDays(15));
         Passport::refreshTokensExpireIn(now()->addDays(30));
         Passport::personalAccessTokensExpireIn(now()->addMonths(6));
-        
+
         // Define token scopes
         Passport::tokensCan([
             'user:read' => 'Read user information',
@@ -293,130 +300,44 @@ php artisan passport:client --password
 php artisan passport:client
 ```
 
-## Code Examples
+## API Usage Guide
 
-### 1. Authorization Code Grant Implementation
+This section provides practical examples of how to interact with the OAuth 2.0 endpoints provided by this starter kit using `curl`.
 
-#### Authorization Controller
+### 1. Authorization Code Grant (Standard)
 
-```php
-<?php
+Used for web applications that can securely store client secrets.
 
-namespace App\Http\Controllers\Auth;
+**Step 1: Redirect to Authorization Server**
+Direct the user to this URL in their browser:
 
-use App\Http\Controllers\Controller;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Str;
-
-class OAuthController extends Controller
-{
-    public function redirectToProvider(Request $request)
-    {
-        $state = Str::random(40);
-        $request->session()->put('oauth_state', $state);
-        
-        $query = http_build_query([
-            'client_id' => config('oauth.client_id'),
-            'redirect_uri' => config('oauth.redirect_uri'),
-            'response_type' => 'code',
-            'scope' => 'user:read user:write',
-            'state' => $state,
-        ]);
-        
-        return redirect(config('oauth.authorization_url') . '?' . $query);
-    }
-    
-    public function handleCallback(Request $request)
-    {
-        $state = $request->session()->pull('oauth_state');
-        
-        if (empty($state) || $state !== $request->state) {
-            return redirect('/')->withErrors(['oauth' => 'Invalid state parameter']);
-        }
-        
-        $response = Http::post(config('oauth.token_url'), [
-            'grant_type' => 'authorization_code',
-            'client_id' => config('oauth.client_id'),
-            'client_secret' => config('oauth.client_secret'),
-            'redirect_uri' => config('oauth.redirect_uri'),
-            'code' => $request->code,
-        ]);
-        
-        if ($response->successful()) {
-            $tokens = $response->json();
-            // Store tokens securely
-            session(['access_token' => $tokens['access_token']]);
-            return redirect('/dashboard');
-        }
-        
-        return redirect('/')->withErrors(['oauth' => 'Failed to obtain access token']);
-    }
-}
+```bash
+# Replace with your actual client_id and redirect_uri
+http://localhost:8000/oauth/redirect?client_id=YOUR_CLIENT_ID&redirect_uri=YOUR_REDIRECT_URI&scope=user:read
 ```
 
-#### Routes
+**Step 2: Exchange Code for Token (Callback)**
+After the user authorizes, they will be redirected back with a `code`. Use this to get the access token:
 
-```php
-<?php
-
-use App\Http\Controllers\Auth\OAuthController;
-
-Route::get('/auth/oauth', [OAuthController::class, 'redirectToProvider']);
-Route::get('/auth/oauth/callback', [OAuthController::class, 'handleCallback']);
+```bash
+curl -X POST http://localhost:8000/oauth/callback \
+     -H "Accept: application/json" \
+     -d "client_id=YOUR_CLIENT_ID" \
+     -d "client_secret=YOUR_CLIENT_SECRET" \
+     -d "redirect_uri=YOUR_REDIRECT_URI" \
+     -d "code=AUTHORIZATION_CODE_FROM_STEP_1" \
+     -d "state=STATE_FROM_STEP_1"
 ```
 
-### 2. Client Credentials Grant Implementation
+### 2. Authorization Code Grant with PKCE
 
-```php
-<?php
+Recommended for mobile and single-page applications.
 
-namespace App\Services;
+**Step 1: Redirect with PKCE**
 
-use Illuminate\Support\Facades\Http;
-
-class ApiService
-{
-    protected $accessToken;
-    
-    public function __construct()
-    {
-        $this->accessToken = $this->getAccessToken();
-    }
-    
-    private function getAccessToken()
-    {
-        $response = Http::post(config('oauth.token_url'), [
-            'grant_type' => 'client_credentials',
-            'client_id' => config('oauth.client_id'),
-            'client_secret' => config('oauth.client_secret'),
-            'scope' => 'api:read api:write',
-        ]);
-        
-        if ($response->successful()) {
-            return $response->json()['access_token'];
-        }
-        
-        throw new \Exception('Failed to obtain access token');
-    }
-    
-    public function makeApiCall($endpoint, $method = 'GET', $data = [])
-    {
-        $response = Http::withHeaders([
-            'Authorization' => 'Bearer ' . $this->accessToken,
-            'Accept' => 'application/json',
-        ])->$method(config('oauth.api_base_url') . $endpoint, $data);
-        
-        return $response->json();
-    }
-}
+```bash
+http://localhost:8000/oauth/redirect?client_id=YOUR_CLIENT_ID&redirect_uri=YOUR_REDIRECT_URI&use_pkce=true
 ```
-
-### 3. PKCE Implementation for SPAs
-
-#### Frontend JavaScript
-
-#### Step 6: Frontend PKCE Implementation
 
 ```javascript
 class OAuthPKCE {
@@ -426,80 +347,80 @@ class OAuthPKCE {
         this.authorizationUrl = authorizationUrl;
         this.tokenUrl = tokenUrl;
     }
-    
+
     async generateCodeChallenge(codeVerifier) {
         const encoder = new TextEncoder();
         const data = encoder.encode(codeVerifier);
-        const digest = await crypto.subtle.digest('SHA-256', data);
+        const digest = await crypto.subtle.digest("SHA-256", data);
         return btoa(String.fromCharCode(...new Uint8Array(digest)))
-            .replace(/\+/g, '-')
-            .replace(/\//g, '_')
-            .replace(/=/g, '');
+            .replace(/\+/g, "-")
+            .replace(/\//g, "_")
+            .replace(/=/g, "");
     }
-    
+
     generateCodeVerifier() {
         const array = new Uint8Array(32);
         crypto.getRandomValues(array);
         return btoa(String.fromCharCode(...array))
-            .replace(/\+/g, '-')
-            .replace(/\//g, '_')
-            .replace(/=/g, '');
+            .replace(/\+/g, "-")
+            .replace(/\//g, "_")
+            .replace(/=/g, "");
     }
-    
+
     async startAuthFlow() {
         const codeVerifier = this.generateCodeVerifier();
         const codeChallenge = await this.generateCodeChallenge(codeVerifier);
-        
-        localStorage.setItem('oauth_code_verifier', codeVerifier);
-        
+
+        localStorage.setItem("oauth_code_verifier", codeVerifier);
+
         const params = new URLSearchParams({
             client_id: this.clientId,
             redirect_uri: this.redirectUri,
-            response_type: 'code',
-            scope: 'user:read user:write',
+            response_type: "code",
+            scope: "user:read user:write",
             code_challenge: codeChallenge,
-            code_challenge_method: 'S256',
-            state: this.generateState()
+            code_challenge_method: "S256",
+            state: this.generateState(),
         });
-        
+
         window.location.href = `${this.authorizationUrl}?${params}`;
     }
-    
+
     async handleCallback() {
         const urlParams = new URLSearchParams(window.location.search);
-        const code = urlParams.get('code');
-        const codeVerifier = localStorage.getItem('oauth_code_verifier');
-        
+        const code = urlParams.get("code");
+        const codeVerifier = localStorage.getItem("oauth_code_verifier");
+
         if (!code || !codeVerifier) {
-            throw new Error('Missing authorization code or code verifier');
+            throw new Error("Missing authorization code or code verifier");
         }
-        
+
         const response = await fetch(this.tokenUrl, {
-            method: 'POST',
+            method: "POST",
             headers: {
-                'Content-Type': 'application/json',
+                "Content-Type": "application/json",
             },
             body: JSON.stringify({
-                grant_type: 'authorization_code',
+                grant_type: "authorization_code",
                 client_id: this.clientId,
                 code: code,
                 redirect_uri: this.redirectUri,
-                code_verifier: codeVerifier
-            })
+                code_verifier: codeVerifier,
+            }),
         });
-        
+
         const tokens = await response.json();
-        
+
         if (response.ok) {
-            localStorage.setItem('access_token', tokens.access_token);
-            localStorage.setItem('refresh_token', tokens.refresh_token);
-            localStorage.removeItem('oauth_code_verifier');
+            localStorage.setItem("access_token", tokens.access_token);
+            localStorage.setItem("refresh_token", tokens.refresh_token);
+            localStorage.removeItem("oauth_code_verifier");
             return tokens;
         }
-        
-        throw new Error('Failed to exchange code for tokens');
+
+        throw new Error("Failed to exchange code for tokens");
     }
-    
+
     generateState() {
         const array = new Uint8Array(16);
         crypto.getRandomValues(array);
@@ -508,344 +429,106 @@ class OAuthPKCE {
 }
 ```
 
-### 4. Middleware for API Protection
+**Step 2: Exchange Code (Callback)**
+The controller handles the `code_verifier` internally via session for this starter kit.
 
-```php
-<?php
-
-namespace App\Http\Middleware;
-
-use Closure;
-use Illuminate\Http\Request;
-use Laravel\Passport\Token;
-
-class ValidateOAuthToken
-{
-    public function handle(Request $request, Closure $next, ...$scopes)
-    {
-        if (!$request->bearerToken()) {
-            return response()->json(['error' => 'Token not provided'], 401);
-        }
-        
-        $token = Token::findToken($request->bearerToken());
-        
-        if (!$token || $token->revoked) {
-            return response()->json(['error' => 'Invalid token'], 401);
-        }
-        
-        if ($token->expires_at < now()) {
-            return response()->json(['error' => 'Token expired'], 401);
-        }
-        
-        // Check scopes if provided
-        if (!empty($scopes)) {
-            $tokenScopes = $token->scopes;
-            foreach ($scopes as $scope) {
-                if (!in_array($scope, $tokenScopes)) {
-                    return response()->json(['error' => 'Insufficient scope'], 403);
-                }
-            }
-        }
-        
-        return $next($request);
-    }
-}
+```bash
+curl -X POST http://localhost:8000/oauth/callback \
+     -H "Accept: application/json" \
+     -d "client_id=YOUR_CLIENT_ID" \
+     -d "redirect_uri=YOUR_REDIRECT_URI" \
+     -d "code=AUTHORIZATION_CODE" \
+     -d "state=STATE"
 ```
+
+### 3. Client Credentials Grant
+
+For machine-to-machine communication.
+
+```bash
+curl -X POST http://localhost:8000/oauth/client-access \
+     -H "Accept: application/json" \
+     -d "client_id=YOUR_CLIENT_ID" \
+     -d "client_secret=YOUR_CLIENT_SECRET" \
+     -d "scope=api:read"
+```
+
+### 4. Password Grant (Legacy/Trusted Apps)
+
+```bash
+curl -X POST http://localhost:8000/oauth/password-access \
+     -H "Accept: application/json" \
+     -d "client_id=YOUR_CLIENT_ID" \
+     -d "client_secret=YOUR_CLIENT_SECRET" \
+     -d "username=user@example.com" \
+     -d "password=your-password" \
+     -d "scope=user:read"
+```
+
+### 5. Refresh Token Grant
+
+```bash
+curl -X POST http://localhost:8000/oauth/refresh \
+     -H "Accept: application/json" \
+     -d "client_id=YOUR_CLIENT_ID" \
+     -d "client_secret=YOUR_CLIENT_SECRET" \
+     -d "refresh_token=YOUR_REFRESH_TOKEN"
+```
+
+### 6. Implicit Grant (Legacy/Not Recommended)
+
+Direct the user to:
+
+```bash
+http://localhost:8000/oauth/implicit-redirect?client_id=YOUR_CLIENT_ID&redirect_uri=YOUR_REDIRECT_URI&scope=user:read
+```
+
+---
 
 ## Security Considerations
 
-### 1. Token Storage
-
-- **Server-side**: Store tokens securely in encrypted database columns
-- **Client-side**: Use secure HTTP-only cookies or secure storage APIs
-- **Never** store tokens in local storage for sensitive applications
-
-### 2. HTTPS Requirements
-
-Always use HTTPS in production:
-
-```php
-// Force HTTPS in production
-if (app()->environment('production')) {
-    \URL::forceScheme('https');
-}
-```
-
-### 3. Token Expiration
-
-Configure appropriate token lifetimes:
-
-```php
-// In AuthServiceProvider
-public function boot()
-{
-    $this->registerPolicies();
-    
-    Passport::tokensExpireIn(now()->addMinutes(60));
-    Passport::refreshTokensExpireIn(now()->addDays(30));
-}
-```
-
-### 4. Scope Management
-
-Define and enforce appropriate scopes:
-
-```php
-// In AuthServiceProvider
-Passport::tokensCan([
-    'user:read' => 'Read user information',
-    'user:write' => 'Modify user information',
-    'api:read' => 'Read API data',
-    'api:write' => 'Write API data',
-]);
-```
-
-### 5. Rate Limiting
-
-Implement rate limiting for OAuth endpoints:
-
-```php
-// In routes/api.php
-Route::middleware(['throttle:60,1'])->group(function () {
-    Route::post('/oauth/token', '\Laravel\Passport\Http\Controllers\AccessTokenController@issueToken');
-});
-```
+1. **HTTPS**: Always use HTTPS in production.
+2. **Secrets**: Never expose `client_secret` in frontend applications. Use PKCE for public clients.
+3. **State**: Always validate the `state` parameter to prevent CSRF attacks.
+4. **Scopes**: Use the minimum required scopes for each token.
 
 ## Testing
 
-### Unit Testing OAuth Flows
+You can test these flows using the built-in Laravel testing suite or tools like Postman.
 
-```php
-<?php
-
-namespace Tests\Feature;
-
-use Tests\TestCase;
-use Illuminate\Foundation\Testing\RefreshDatabase;
-use Laravel\Passport\Passport;
-use App\Models\User;
-
-class OAuthTest extends TestCase
-{
-    use RefreshDatabase;
-    
-    public function test_authorization_code_flow()
-    {
-        $user = User::factory()->create();
-        
-        $response = $this->get('/auth/oauth');
-        
-        $response->assertStatus(302);
-        $response->assertSessionHas('oauth_state');
-    }
-    
-    public function test_client_credentials_flow()
-    {
-        $response = $this->post('/oauth/token', [
-            'grant_type' => 'client_credentials',
-            'client_id' => 'test-client',
-            'client_secret' => 'test-secret',
-            'scope' => 'api:read'
-        ]);
-        
-        $response->assertStatus(200);
-        $response->assertJsonStructure([
-            'access_token',
-            'token_type',
-            'expires_in'
-        ]);
-    }
-    
-    public function test_protected_route_requires_token()
-    {
-        $response = $this->get('/api/user');
-        $response->assertStatus(401);
-    }
-    
-    public function test_protected_route_with_valid_token()
-    {
-        $user = User::factory()->create();
-        Passport::actingAs($user, ['user:read']);
-        
-        $response = $this->get('/api/user');
-        $response->assertStatus(200);
-    }
-}
-```
-
-### Integration Testing
-
-```php
-<?php
-
-namespace Tests\Integration;
-
-use Tests\TestCase;
-use Illuminate\Foundation\Testing\RefreshDatabase;
-use Laravel\Passport\Client;
-
-class OAuthIntegrationTest extends TestCase
-{
-    use RefreshDatabase;
-    
-    public function test_full_authorization_flow()
-    {
-        // Create OAuth client
-        $client = Client::factory()->create([
-            'redirect' => 'http://localhost/callback'
-        ]);
-        
-        // Step 1: Get authorization code
-        $authResponse = $this->get('/oauth/authorize?' . http_build_query([
-            'client_id' => $client->id,
-            'redirect_uri' => 'http://localhost/callback',
-            'response_type' => 'code',
-            'scope' => 'user:read',
-            'state' => 'random-state'
-        ]));
-        
-        // Step 2: Exchange code for token
-        $tokenResponse = $this->post('/oauth/token', [
-            'grant_type' => 'authorization_code',
-            'client_id' => $client->id,
-            'client_secret' => $client->secret,
-            'redirect_uri' => 'http://localhost/callback',
-            'code' => 'authorization-code'
-        ]);
-        
-        $tokenResponse->assertJsonStructure([
-            'access_token',
-            'refresh_token',
-            'token_type',
-            'expires_in'
-        ]);
-    }
-}
+```bash
+php artisan test
 ```
 
 ## Troubleshooting
 
-### Common Issues and Solutions
-
-#### 1. "Invalid Client" Error
-
-**Problem**: Client ID or secret is incorrect.
-
-**Solution**:
-```bash
-# Verify client credentials
-php artisan passport:client --show
-```
-
-#### 2. "Invalid Grant" Error
-
-**Problem**: Authorization code has expired or been used.
-
-**Solution**:
-- Ensure codes are used immediately after generation
-- Check code expiration settings
-- Verify redirect URI matches exactly
-
-#### 3. "Invalid Scope" Error
-
-**Problem**: Requested scope is not available or properly configured.
-
-**Solution**:
-```php
-// In AuthServiceProvider, define available scopes
-Passport::tokensCan([
-    'user:read' => 'Read user information',
-    'user:write' => 'Modify user information',
-]);
-```
-
-#### 4. Token Not Found in Request
-
-**Problem**: Bearer token not properly sent in Authorization header.
-
-**Solution**:
-```javascript
-// Correct way to send token
-fetch('/api/protected', {
-    headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Accept': 'application/json'
-    }
-});
-```
-
-#### 5. CORS Issues with SPA
-
-**Problem**: Cross-origin requests blocked.
-
-**Solution**:
-```php
-// In config/cors.php
-'paths' => ['api/*', 'oauth/*'],
-'allowed_methods' => ['*'],
-'allowed_origins' => ['http://localhost:3000'],
-'allowed_headers' => ['*'],
-'supports_credentials' => true,
-```
-
-### Debug Mode
-
-Enable debug mode for detailed error messages:
-
-```php
-// In .env for development only
-APP_DEBUG=true
-PASSPORT_DEBUG=true
-```
+- **401 Unauthorized**: Check if your `client_id` or `client_secret` is correct.
+- **403 Forbidden**: Invalid `state` parameter or insufficient scopes.
+- **405 Method Not Allowed**: Ensure you are using the correct HTTP method (POST for token exchanges).
 
 ## Best Practices
 
 ### 1. Security Best Practices
 
-- **Always use HTTPS** in production
-- **Implement proper CSRF protection** for web flows
-- **Use short-lived access tokens** (15-60 minutes)
-- **Implement token refresh logic** for long-running applications
-- **Store secrets securely** using environment variables
-- **Validate all input parameters** on OAuth endpoints
-- **Implement proper logging** for security events
+- **Use PKCE** for all public clients (mobile, SPAs).
+- **Always use HTTPS** in production environments.
+- **Implement CSRF protection** for all authorization code flows.
+- **Use short-lived access tokens** and refresh tokens for better security.
+- **Store secrets securely** using environment variables or a secrets manager.
+- **Validate all input parameters** strictly on OAuth endpoints.
 
-### 2. Performance Optimization
+### 2. Performance & UX
 
-- **Cache OAuth client information** to reduce database queries
-- **Use Redis for token storage** in high-traffic applications
-- **Implement connection pooling** for database connections
-- **Use CDN for static assets** in OAuth flows
-- **Optimize token validation** with caching strategies
+- **Cache OAuth client information** to reduce database overhead.
+- **Implement graceful token refresh** logic in your frontend applications.
+- **Provide clear error messages** to help users and developers debug issues.
+- **Allow users to revoke tokens** via their account settings.
 
-### 3. User Experience
+### 3. Monitoring & Logging
 
-- **Provide clear error messages** for OAuth failures
-- **Implement proper loading states** during OAuth flows
-- **Allow users to revoke tokens** through settings
-- **Provide token management interface** for power users
-- **Implement graceful token refresh** in SPAs
-
-### 4. Monitoring and Logging
-
-```php
-// Log OAuth events for monitoring
-Log::info('OAuth token issued', [
-    'client_id' => $client->id,
-    'user_id' => $user->id,
-    'scopes' => $scopes,
-    'ip_address' => request()->ip()
-]);
-```
-
-### 5. Code Organization
-
-- **Separate OAuth logic** into dedicated service classes
-- **Use form requests** for OAuth parameter validation
-- **Implement proper error handling** with custom exceptions
-- **Create reusable OAuth components** for frontend
-- **Follow Laravel coding standards** throughout the application
+- **Log OAuth events** (issue, refresh, revoke) for auditing purposes.
+- **Monitor for suspicious activity**, such as high-frequency login failures.
 
 ---
 
-This documentation provides a comprehensive guide for implementing OAuth 2.0 grants in Laravel applications. For additional support or questions, please refer to the Laravel Passport documentation or create an issue in the repository.
+This documentation provides a comprehensive guide for implementing OAuth 2.0 grants in Laravel applications. For additional support or questions, please refer to the [Laravel Passport Documentation](https://laravel.com/docs/passport).

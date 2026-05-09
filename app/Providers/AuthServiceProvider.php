@@ -30,5 +30,13 @@ class AuthServiceProvider extends ServiceProvider
         Passport::tokensExpireIn(now()->addDays(15));
         Passport::refreshTokensExpireIn(now()->addDays(30));
         Passport::personalAccessTokensExpireIn(now()->addMonths(6));
+
+        // Define token scopes
+        Passport::tokensCan([
+            'user:read' => 'Read user information',
+            'user:write' => 'Modify user information',
+            'api:read' => 'Read API data',
+            'api:write' => 'Write API data',
+        ]);
     }
 }
